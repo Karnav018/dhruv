@@ -2,71 +2,103 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Route Safety Monitor</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         :root { --bg: #ffffff; --border: #000000; --accent-red: #ff0000; }
+        
         body, html { margin: 0; padding: 0; height: 100%; font-family: -apple-system, sans-serif; overflow: hidden; }
-        .wrapper { display: flex; height: 100vh; }
-
-        /* Left UI */
-        .sidebar {
-            width: 340px; padding: 3rem 2.5rem; border-right: 2px solid var(--border);
-            background: #fff; display: flex; flex-direction: column; z-index: 1000;
+        
+        /* Flex Wrapper: Column on mobile, Row on desktop */
+        .wrapper { 
+            display: flex; 
+            flex-direction: column; 
+            height: 100vh; 
+            width: 100vw; 
         }
-        h1 { font-size: 1.2rem; font-weight: 900; text-transform: uppercase; margin-bottom: 3rem; line-height: 1; }
-        .input-group { margin-bottom: 1.5rem; }
-        label { display: block; font-size: 0.65rem; font-weight: 800; text-transform: uppercase; margin-bottom: 5px; color: #666; }
+
+        /* UI Panel Styling */
+        .sidebar {
+            width: 100%;
+            padding: 1.5rem;
+            border-bottom: 2px solid var(--border);
+            background: #fff;
+            z-index: 1000;
+            box-sizing: border-box;
+        }
+
+        h1 { font-size: 1rem; font-weight: 900; text-transform: uppercase; margin: 0 0 1.5rem 0; line-height: 1; letter-spacing: 1px; }
+        
+        .input-row { display: flex; gap: 10px; margin-bottom: 10px; }
+        .input-group { flex: 1; }
+        
+        label { display: block; font-size: 0.6rem; font-weight: 800; text-transform: uppercase; margin-bottom: 3px; color: #666; }
+        
         input {
             width: 100%; border: none; border-bottom: 2px solid var(--border);
-            padding: 10px 0; font-size: 1rem; outline: none; text-transform: capitalize;
-        }
-        button {
-            background: var(--border); color: white; border: none; padding: 16px;
-            font-weight: 700; text-transform: uppercase; cursor: pointer; margin-top: 10px;
+            padding: 8px 0; font-size: 1rem; outline: none; text-transform: capitalize;
+            border-radius: 0;
         }
 
-        /* Numbered Pin Styling */
+        button {
+            width: 100%; background: var(--border); color: white; border: none; 
+            padding: 14px; font-weight: 700; text-transform: uppercase; 
+            cursor: pointer; font-size: 0.8rem;
+        }
+
+        /* Map occupies remaining space */
+        #map { flex-grow: 1; width: 100%; background: #f0f0f0; }
+
+        /* Custom Numbered Pin */
         .pin-marker {
-            background: #000;
-            color: #fff;
-            width: 24px !important;
-            height: 24px !important;
-            border-radius: 50% 50% 50% 0;
-            transform: rotate(-45deg);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            font-size: 10px;
-            border: 2px solid #fff;
+            background: #000; color: #fff; width: 24px !important; height: 24px !important;
+            border-radius: 50% 50% 50% 0; transform: rotate(-45deg);
+            display: flex; align-items: center; justify-content: center;
+            font-weight: bold; font-size: 10px; border: 2px solid #fff;
             box-shadow: 0 0 5px rgba(0,0,0,0.3);
         }
         .pin-marker span { transform: rotate(45deg); }
 
-        #map { flex-grow: 1; background: #f0f0f0; }
+        /* Desktop Adjustments */
+        @media (min-width: 768px) {
+            .wrapper { flex-direction: row; }
+            .sidebar { 
+                width: 340px; 
+                height: 100vh; 
+                border-bottom: none; 
+                border-right: 2px solid var(--border); 
+                padding: 3rem 2rem;
+            }
+            .input-row { flex-direction: column; gap: 0; }
+            h1 { font-size: 1.5rem; margin-bottom: 3rem; }
+            .input-group { margin-bottom: 1.5rem; }
+        }
+
+        #status { font-size: 0.7rem; font-weight: 700; margin-top: 10px; text-align: center; display: none; }
     </style>
 </head>
 <body>
 
 <div class="wrapper">
     <div class="sidebar">
-        <h1>Route<br>Incidents</h1>
-        <div class="input-group">
-            <label>Origin</label>
-            <input type="text" id="from" placeholder="e.g. Anand" value="Anand">
+        <h1>Safety Analytics</h1>
+        
+        <div class="input-row">
+            <div class="input-group">
+                <label>Origin</label>
+                <input type="text" id="from" placeholder="Anand" value="Anand">
+            </div>
+            <div class="input-group">
+                <label>Destination</label>
+                <input type="text" id="to" placeholder="Ahmedabad" value="Ahmedabad">
+            </div>
         </div>
-        <div class="input-group">
-            <label>Destination</label>
-            <input type="text" id="to" placeholder="e.g. Ahmedabad" value="Ahmedabad">
-        </div>
+        
         <button id="btn">Analyze Route</button>
-
-        <div id="status" style="margin-top: 2rem; font-size: 0.8rem; font-weight: 600; display: none;">
-            FETCHING ROAD DATA...
-        </div>
+        <div id="status">PROCESSING UNIVERSE DATA...</div>
     </div>
+    
     <div id="map"></div>
 </div>
 
@@ -91,7 +123,7 @@
         const to = document.getElementById('to').value.toLowerCase().trim();
         
         if(!cityDB[from] || !cityDB[to]) {
-            alert("Location not in local database. Try Anand, Ahmedabad, or Vadodara.");
+            alert("Please use: Anand, Ahmedabad, Vadodara, Nadiad, Surat, or Rajkot.");
             return;
         }
 
@@ -99,50 +131,40 @@
         mapLayers.forEach(l => map.removeLayer(l));
         mapLayers = [];
 
-        const start = cityDB[from];
-        const end = cityDB[to];
-
         try {
-            // OSRM API for real road path
+            const start = cityDB[from];
+            const end = cityDB[to];
             const response = await fetch(`https://router.project-osrm.org/route/v1/driving/${start[1]},${start[0]};${end[1]},${end[0]}?overview=full&geometries=geojson`);
             const data = await response.json();
             const coords = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
 
-            // 1. Draw Red Route Line
             const poly = L.polyline(coords, { color: '#ff0000', weight: 5, opacity: 0.9 }).addTo(map);
             mapLayers.push(poly);
 
-            // 2. Add Start/End Markers
-            const startIcon = L.divIcon({ className: 'pin-marker', html: '<span>S</span>', iconSize: [24, 24], iconAnchor: [12, 24] });
-            const endIcon = L.divIcon({ className: 'pin-marker', html: '<span>E</span>', iconSize: [24, 24], iconAnchor: [12, 24] });
+            // Markers
+            const icons = {
+                start: L.divIcon({ className: 'pin-marker', html: '<span>S</span>', iconAnchor: [12, 24] }),
+                end: L.divIcon({ className: 'pin-marker', html: '<span>E</span>', iconAnchor: [12, 24] })
+            };
             
-            mapLayers.push(L.marker(start, { icon: startIcon }).addTo(map));
-            mapLayers.push(L.marker(end, { icon: endIcon }).addTo(map));
+            mapLayers.push(L.marker(start, { icon: icons.start }).addTo(map));
+            mapLayers.push(L.marker(end, { icon: icons.end }).addTo(map));
 
-            // 3. Add Numbered Accident Pins along the route
-            const incidentCount = 5;
-            for(let i = 1; i <= incidentCount; i++) {
-                const randomIndex = Math.floor(Math.random() * (coords.length - 20)) + 10;
-                const point = coords[randomIndex];
-                
-                const pinIcon = L.divIcon({
-                    className: 'pin-marker',
-                    html: `<span>${i}</span>`,
-                    iconSize: [24, 24],
-                    iconAnchor: [12, 24]
-                });
-
-                const marker = L.marker(point, { icon: pinIcon }).addTo(map);
-                marker.bindPopup(`<b>Accident #${i}</b><br>Detected on Highway.`);
-                mapLayers.push(marker);
+            // Random Accidents
+            for(let i = 1; i <= 4; i++) {
+                const p = coords[Math.floor(Math.random() * (coords.length - 10)) + 5];
+                const accIcon = L.divIcon({ className: 'pin-marker', html: `<span>${i}</span>`, iconAnchor: [12, 24] });
+                const m = L.marker(p, { icon: accIcon }).addTo(map);
+                m.bindPopup(`<b>Incident #${i}</b>`);
+                mapLayers.push(m);
             }
 
-            map.fitBounds(poly.getBounds(), { padding: [50, 50] });
+            map.fitBounds(poly.getBounds(), { padding: [30, 30] });
             document.getElementById('status').style.display = 'none';
 
         } catch (err) {
-            console.error(err);
-            alert("Error loading route data.");
+            document.getElementById('status').style.display = 'none';
+            alert("Error fetching route.");
         }
     };
 </script>
