@@ -10,7 +10,6 @@
         
         body, html { margin: 0; padding: 0; height: 100%; font-family: -apple-system, sans-serif; overflow: hidden; }
         
-        /* Flex Wrapper: Column on mobile, Row on desktop */
         .wrapper { 
             display: flex; 
             flex-direction: column; 
@@ -18,7 +17,6 @@
             width: 100vw; 
         }
 
-        /* UI Panel Styling */
         .sidebar {
             width: 100%;
             padding: 1.5rem;
@@ -26,6 +24,8 @@
             background: #fff;
             z-index: 1000;
             box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
         }
 
         h1 { font-size: 1rem; font-weight: 900; text-transform: uppercase; margin: 0 0 1.5rem 0; line-height: 1; letter-spacing: 1px; }
@@ -47,10 +47,18 @@
             cursor: pointer; font-size: 0.8rem;
         }
 
-        /* Map occupies remaining space */
+        /* Accident Total Display */
+        .total-display {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #eee;
+            display: none; /* Hidden until search */
+        }
+        .total-label { font-size: 0.65rem; font-weight: 800; text-transform: uppercase; color: #666; }
+        .total-count { font-size: 2.5rem; font-weight: 900; color: var(--border); line-height: 1; }
+
         #map { flex-grow: 1; width: 100%; background: #f0f0f0; }
 
-        /* Custom Numbered Pin */
         .pin-marker {
             background: #000; color: #fff; width: 24px !important; height: 24px !important;
             border-radius: 50% 50% 50% 0; transform: rotate(-45deg);
@@ -60,7 +68,6 @@
         }
         .pin-marker span { transform: rotate(45deg); }
 
-        /* Desktop Adjustments */
         @media (min-width: 768px) {
             .wrapper { flex-direction: row; }
             .sidebar { 
@@ -73,6 +80,7 @@
             .input-row { flex-direction: column; gap: 0; }
             h1 { font-size: 1.5rem; margin-bottom: 3rem; }
             .input-group { margin-bottom: 1.5rem; }
+            .total-display { margin-top: auto; }
         }
 
         #status { font-size: 0.7rem; font-weight: 700; margin-top: 10px; text-align: center; display: none; }
@@ -96,7 +104,12 @@
         </div>
         
         <button id="btn">Analyze Route</button>
-        <div id="status">PROCESSING UNIVERSE DATA...</div>
+        <div id="status">PROCESSING...</div>
+
+        <div class="total-display" id="totalBox">
+            <div class="total-label">Total Accidents on Route</div>
+            <div class="total-count" id="accidentTotal">0</div>
+        </div>
     </div>
     
     <div id="map"></div>
@@ -123,7 +136,7 @@
         const to = document.getElementById('to').value.toLowerCase().trim();
         
         if(!cityDB[from] || !cityDB[to]) {
-            alert("Please use: Anand, Ahmedabad, Vadodara, Nadiad, Surat, or Rajkot.");
+            alert("Use: Anand, Ahmedabad, Vadodara, Nadiad, Surat, Rajkot.");
             return;
         }
 
@@ -141,7 +154,6 @@
             const poly = L.polyline(coords, { color: '#ff0000', weight: 5, opacity: 0.9 }).addTo(map);
             mapLayers.push(poly);
 
-            // Markers
             const icons = {
                 start: L.divIcon({ className: 'pin-marker', html: '<span>S</span>', iconAnchor: [12, 24] }),
                 end: L.divIcon({ className: 'pin-marker', html: '<span>E</span>', iconAnchor: [12, 24] })
@@ -150,7 +162,12 @@
             mapLayers.push(L.marker(start, { icon: icons.start }).addTo(map));
             mapLayers.push(L.marker(end, { icon: icons.end }).addTo(map));
 
-            // Random Accidents
+            // Generate a random total for display
+            const totalAccidents = Math.floor(Math.random() * 45) + 12;
+            document.getElementById('accidentTotal').innerText = totalAccidents;
+            document.getElementById('totalBox').style.display = 'block';
+
+            // Show 4 pins on map representing the cluster
             for(let i = 1; i <= 4; i++) {
                 const p = coords[Math.floor(Math.random() * (coords.length - 10)) + 5];
                 const accIcon = L.divIcon({ className: 'pin-marker', html: `<span>${i}</span>`, iconAnchor: [12, 24] });
