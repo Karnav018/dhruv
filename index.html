@@ -92,14 +92,21 @@
     <div class="sidebar">
         <h1>Safety Analytics</h1>
         
+        <div class="input-row" style="margin-bottom: 20px;">
+            <div class="input-group">
+                <label>Data Source (.xlsx)</label>
+                <input type="file" id="dataFile" accept=".xlsx" style="font-size: 0.8rem; padding: 10px 0; border: none; border-bottom: 2px solid var(--border); width: 100%; box-sizing: border-box; font-family: inherit; cursor: pointer; background: transparent;">
+            </div>
+        </div>
+        
         <div class="input-row">
             <div class="input-group">
                 <label>Origin</label>
-                <input type="text" id="from" placeholder="Anand" value="Anand">
+                <input type="text" id="from" placeholder="Samarkha" value="Samarkha">
             </div>
             <div class="input-group">
                 <label>Destination</label>
-                <input type="text" id="to" placeholder="Ahmedabad" value="Ahmedabad">
+                <input type="text" id="to" placeholder="Bhalej" value="Bhalej">
             </div>
         </div>
         
@@ -116,42 +123,113 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
 <script>
     const map = L.map('map', { zoomControl: false }).setView([22.5, 72.8], 8);
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(map);
 
-    const cityDB = {
-        "anand": [22.5645, 72.9289],
-        "ahmedabad": [23.0225, 72.5714],
-        "vadodara": [22.3072, 73.1812],
-        "nadiad": [22.6916, 72.8634],
-        "surat": [21.1702, 72.8311],
-        "rajkot": [22.3039, 70.8022]
-    };
+    let cityDB = {};
+    let accidentData = {};
+    let dataLoaded = false;
+
+    // Handle Uploading Excel Data
+    document.getElementById('dataFile').addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, {type: 'array'});
+                const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                const jsonData = XLSX.utils.sheet_to_json(firstSheet);
+                
+                cityDB = {};
+                accidentData = {};
+                
+                jsonData.forEach(row => {
+                    const fromCity = row['From']?.toString().toLowerCase().trim();
+                    const toCity = row['To']?.toString().toLowerCase().trim();
+                    
+                    if (!fromCity || !toCity) return;
+
+                    if (row['Fromlat'] && row['Fromlng']) {
+                        cityDB[fromCity] = [parseFloat(row['Fromlat']), parseFloat(row['Fromlng'])];
+                    }
+                    if (row['Tolat'] && row['Tolng']) {
+                        cityDB[toCity] = [parseFloat(row['Tolat']), parseFloat(row['Tolng'])];
+                    }
+                    
+                    const accidents = parseInt(row['Total accdent (1 year)']) || 0;
+                    accidentData[`${fromCity}-${toCity}`] = accidents;
+                    accidentData[`${toCity}-${fromCity}`] = accidents;
+                    // Store route segments info
+                    routeSegments.push({
+                        from: fromCity,
+                        to: toCity,
+                        startCoord: cityDB[fromCity],
+                        endCoord: cityDB[toCity],
+                        accidents: accidents
+                    });
+                });
+
+                dataLoaded = true;
+                alert("Data loaded successfully! You can now type a route and click Analyze Route.");
+                
+                // Adjust map to the loaded points
+                const lats = Object.values(cityDB).map(c => c[0]);
+                const lngs = Object.values(cityDB).map(c => c[1]);
+                if (lats.length > 0 && lngs.length > 0) {
+                    map.fitBounds([
+                        [Math.min(...lats), Math.min(...lngs)],
+                        [Math.max(...lats), Math.max(...lngs)]
+                    ], { padding: [50, 50] });
+                }
+
+            } catch (err) {
+                console.error(err);
+                alert("Error parsing the Excel file. Make sure it matches the required format.");
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    });
 
     let mapLayers = [];
-
-    document.getElementById('btn').onclick = async () => {
-        const from = document.getElementById('from').value.toLowerCase().trim();
-        const to = document.getElementById('to').value.toLowerCase().trim();
+    let routeSegments = [];
+    
+    // Distribute pins evenly along a route
+    function distributePins(coords, numPins) {
+        if (numPins <= 0) return [];
+        if (coords.length === 0) return [];
+        if (numPins === 1) return [coords[Math.floor(coords.length / 2)]];
         
-        if(!cityDB[from] || !cityDB[to]) {
-            alert("Use: Anand, Ahmedabad, Vadodara, Nadiad, Surat, Rajkot.");
-            return;
+        const pins = [];
+        // Avoid placing exactly on the very first or very last coordinate (the cities themselves)
+        const step = (coords.length - 2) / (numPins + 1); 
+        
+        for (let i = 1; i <= numPins; i++) {
+            const index = Math.floor(step * i);
+            if(index > 0 && index < coords.length) {
+                pins.push(coords[index]);
+            }
         }
+        return pins;
+    }
 
-        document.getElementById('status').style.display = 'block';
-        mapLayers.forEach(l => map.removeLayer(l));
-        mapLayers = [];
-
+    async function fetchAndDrawRoute(start, end, accidents, color = '#ff0000') {
         try {
-            const start = cityDB[from];
-            const end = cityDB[to];
+            // OSRM requires [lng, lat]
             const response = await fetch(`https://router.project-osrm.org/route/v1/driving/${start[1]},${start[0]};${end[1]},${end[0]}?overview=full&geometries=geojson`);
+            if(!response.ok) throw new Error("OSRM Network response was not ok");
+            
             const data = await response.json();
+            if(!data.routes || !data.routes[0]) throw new Error("Routes not found from OSRM");
+            
+            // Leaflet requires [lat, lng]
             const coords = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
 
-            const poly = L.polyline(coords, { color: '#ff0000', weight: 5, opacity: 0.9 }).addTo(map);
+            const poly = L.polyline(coords, { color: color, weight: 5, opacity: 0.9 }).addTo(map);
             mapLayers.push(poly);
 
             const icons = {
@@ -162,26 +240,90 @@
             mapLayers.push(L.marker(start, { icon: icons.start }).addTo(map));
             mapLayers.push(L.marker(end, { icon: icons.end }).addTo(map));
 
-            // Generate a random total for display
-            const totalAccidents = Math.floor(Math.random() * 45) + 12;
+            const pinCoords = distributePins(coords, accidents);
+            pinCoords.forEach((p, idx) => {
+                const accIcon = L.divIcon({ className: 'pin-marker', html: `<span>${idx + 1}</span>`, iconAnchor: [12, 24], bgPos: [-12, -24] });
+                const m = L.marker(p, { icon: accIcon }).addTo(map);
+                m.bindPopup(`<b>Incident #${idx + 1}</b><br>Accident recorded on this segment.`);
+                mapLayers.push(m);
+            });
+            
+            return poly.getBounds();
+        } catch(err) {
+            console.error("Error drawing route segment:", err);
+            return null;
+        }
+    }
+
+    async function renderAllRoutes() {
+        document.getElementById('status').style.display = 'block';
+        document.getElementById('status').innerText = 'DRAWING ALL ROUTES...';
+        
+        mapLayers.forEach(l => map.removeLayer(l));
+        mapLayers = [];
+
+        // Colors for different segments
+        const colors = ['#ff0000', '#0000ff', '#ff8c00', '#800080', '#008000', '#e74c3c', '#9b59b6'];
+
+        for (let i = 0; i < routeSegments.length; i++) {
+            const seg = routeSegments[i];
+            const color = colors[i % colors.length];
+            // Render route to map, adding delay to avoid rate limiting OSRM demo server
+            await fetchAndDrawRoute(seg.startCoord, seg.endCoord, seg.accidents, color);
+            await new Promise(r => setTimeout(r, 400)); 
+        }
+
+        document.getElementById('status').style.display = 'none';
+    }
+
+    document.getElementById('btn').onclick = async () => {
+        if (!dataLoaded) {
+            alert("Please upload the data.xlsx file first!");
+            return;
+        }
+
+        const from = document.getElementById('from').value.toLowerCase().trim();
+        const to = document.getElementById('to').value.toLowerCase().trim();
+        
+        if(!cityDB[from] || !cityDB[to]) {
+            alert(`City not found in uploaded data. Available cities: ${Object.keys(cityDB).map(c => c.charAt(0).toUpperCase() + c.slice(1)).join(', ')}`);
+            return;
+        }
+
+        // Reset display state
+        document.getElementById('status').style.display = 'block';
+        document.getElementById('status').innerText = 'ANALYZING SPECIFIC ROUTE...';
+        document.getElementById('totalBox').style.display = 'none';
+
+        try {
+            const start = cityDB[from];
+            const end = cityDB[to];
+            const routeKey = `${from}-${to}`;
+            
+            let totalAccidents = accidentData[routeKey];
+            if (totalAccidents === undefined) {
+                totalAccidents = "Route Not in Data";
+            }
             document.getElementById('accidentTotal').innerText = totalAccidents;
             document.getElementById('totalBox').style.display = 'block';
 
-            // Show 4 pins on map representing the cluster
-            for(let i = 1; i <= 4; i++) {
-                const p = coords[Math.floor(Math.random() * (coords.length - 10)) + 5];
-                const accIcon = L.divIcon({ className: 'pin-marker', html: `<span>${i}</span>`, iconAnchor: [12, 24] });
-                const m = L.marker(p, { icon: accIcon }).addTo(map);
-                m.bindPopup(`<b>Incident #${i}</b>`);
-                mapLayers.push(m);
+            // Visually highlight this specifically routed segment if direct
+            mapLayers.forEach(l => map.removeLayer(l));
+            mapLayers = [];
+            
+            // Only draw it and distribute pins if we have a valid int for accidents on the route in Excel
+            let pinsToDraw = typeof totalAccidents === 'number' ? totalAccidents : 0;
+            const bounds = await fetchAndDrawRoute(start, end, pinsToDraw, '#ff0000');
+            if(bounds) {
+                map.fitBounds(bounds, { padding: [30, 30] });
             }
 
-            map.fitBounds(poly.getBounds(), { padding: [30, 30] });
             document.getElementById('status').style.display = 'none';
 
         } catch (err) {
             document.getElementById('status').style.display = 'none';
-            alert("Error fetching route.");
+            alert("Error analyzing route.");
+            console.error(err);
         }
     };
 </script>
